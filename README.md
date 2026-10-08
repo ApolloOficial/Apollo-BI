@@ -2,11 +2,11 @@
 
 # ☀️ Apollo BI
 
-### Inteligência de dados para a gestão do ciclo de vida de painéis solares
+### Métricas de saúde e sustentabilidade dos ativos solares do Apollo
 
-Pipeline de dados em arquitetura medalhão no **Databricks**, alimentado pelo banco
-do ecossistema **Apollo** no Neon, que gera a base tratada, os KPIs e o dashboard
-gerencial do projeto.
+Pipeline de dados em arquitetura medalhão no **Databricks**, que lê o banco do
+Apollo no Neon, calcula os índices de sustentabilidade (IS) e alimenta o dashboard
+embutido na web.
 
 [![Databricks](https://img.shields.io/badge/Databricks-Free_Edition-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://www.databricks.com/)
 [![Python](https://img.shields.io/badge/PySpark-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://spark.apache.org/docs/latest/api/python/)
@@ -20,24 +20,61 @@ gerencial do projeto.
 
 ## Sobre o projeto
 
-O **Apollo BI** é a entrega de Business Intelligence do Projeto Interdisciplinar
-Apollo. A solução transforma os dados gerados pela aplicação (lotes, painéis,
-unidades, manutenções e demais entidades) em informação organizada para apoiar a
-decisão de gerentes e analistas das filiais.
+O **Apollo** é uma plataforma SaaS multi-tenant para gestão do ciclo de vida de
+ativos fotovoltaicos em empresas industriais. O inversor mede o desempenho de cada
+string, e o Apollo usa esse dado real para gerar alertas, ordens de serviço e
+realocações de placas.
 
-Nesta etapa, o repositório entrega a estrutura do pipeline, a conexão com a fonte
-de dados e as três camadas de tratamento. O cálculo dos KPIs e o dashboard são os
-próximos passos.
+O **Apollo BI** é a camada de análise dessa plataforma. Ele lê o banco do Apollo
+no Neon, trata os dados em três camadas e calcula os índices que aparecem na aba
+**Métricas** da web. O **Gerente** e o **Analista** acessam o dashboard e veem
+apenas a própria filial.
+
+> A unidade monitorada no Apollo é a **string**. A hierarquia dos ativos é:
+> empresa, filial, inversor, string e placa.
+
+## Dados de origem
+
+A fonte é o banco do Apollo no Neon (PostgreSQL, 24 tabelas). Os grupos de tabelas
+mais relevantes para o BI são:
+
+| Grupo | Tabelas |
+|---|---|
+| Organização | `company`, `company_unit`, `address`, `segment`, `employee`, `administrator` |
+| Ativos | `inverter`, `string`, `panel`, `inverter_model`, `panel_model` |
+| Medição e saúde | `string_performance_measurement`, `string_health_history` |
+| Alertas e manutenção | `warning`, `maintenance_register`, `maintenance_part`, `maintenance_type`, `part`, `stock` |
+| Histórico | `panel_status_history`, `access_log` |
+
+As medições por string (`power_w`, `voltage_v`, `current_a`, `generated_energy_kwh`,
+`fault_code`) vêm do inversor. Na demonstração, elas são geradas por um simulador, e
+a coluna `data_source` registra a origem de cada leitura.
+
+## Índices de sustentabilidade (IS)
+
+| Índice | O que mede |
+|---|---|
+| **IS Ambiental** | Vida útil do painel |
+| **IS Financeiro** | Custo do painel comparado ao que seria pago de energia sem o sistema |
+| **IS Energético** | Queda brusca na captação e desempenho abaixo do padrão da etiqueta do equipamento |
+| **IS Geral** | Combinação dos três índices, por filial |
+
+Regras de cálculo definidas pelo grupo:
+
+- Tudo o que não existir no banco atual fica de fora do cálculo. O schema não será alterado para isso;
+- cada IS é calculado por string (ou inversor) e depois agregado por filial;
+- não existe tabela por painel na camada final.
 
 ## Funcionalidades previstas
 
-- Conexão com o Neon por JDBC, com credenciais guardadas em Databricks Secrets;
-- Ingestão das tabelas do banco sem alteração na camada `raw`;
-- Limpeza e padronização dos dados na camada `cleaned`;
-- Cálculo dos KPIs e dos índices de sustentabilidade (IS Financeiro, Ambiental e Energético) na camada `curated`;
-- Dashboard conectado à base final, com filtros por período e filial;
+- Conexão com o Neon por JDBC, com credenciais em Databricks Secrets;
+- ingestão das tabelas do banco sem alteração na camada `raw`;
+- limpeza e padronização na camada `cleaned`;
+- cálculo dos quatro índices na camada `curated`;
+- dashboard (Lakeview) embutido na aba Métricas da web;
+- acesso restrito por filial (Row Filter) para Gerente e Analista;
 - Job no Databricks para executar o pipeline sem rodar célula por célula;
-- Relatório gerencial explicando a base, o problema, o tratamento e os KPIs.
+- relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
 
 ## Arquitetura
 
@@ -45,11 +82,13 @@ O fluxo segue a arquitetura medalhão, com nomes descritivos para cada camada:
 
 ```mermaid
 flowchart LR
-    N[(Neon PostgreSQL)] --> C[Notebook core]
+    I[Inversor ou simulador] --> N[(Neon PostgreSQL)]
+    N --> C[Notebook core]
     C --> R[raw]
     R --> CL[cleaned]
     CL --> CU[curated]
-    CU --> D[Dashboard]
+    CU --> D[Dashboard Lakeview]
+    D --> W[Web Apollo: aba Métricas]
     J[Job do Databricks] -. orquestra .-> R
     J -. orquestra .-> CL
     J -. orquestra .-> CU
@@ -59,7 +98,7 @@ flowchart LR
 |---|---|---|
 | `raw` | Bronze | Cópia fiel das tabelas do Neon, com data e origem da ingestão |
 | `cleaned` | Silver | Nomes padronizados, textos sem espaços extras, sem duplicatas exatas |
-| `curated` | Gold | KPIs e índices calculados, prontos para o dashboard |
+| `curated` | Gold | Índices calculados por string e por filial, prontos para o dashboard |
 
 ```text
 apollo-bi/
@@ -68,25 +107,26 @@ apollo-bi/
 ├── apollo_pipeline/
 │   ├── raw_ingest                     # Neon para a camada raw
 │   ├── cleaned_transform              # raw para a camada cleaned
-│   └── curated_kpis                   # cleaned para a camada curated
+│   └── curated_kpis                   # cleaned para a camada curated (cálculo dos IS)
 ├── apollo_manager/                    # Dashboard principal (a criar)
 └── README.md
 ```
 
 As tabelas são salvas como `workspace.raw`, `workspace.cleaned` e
-`workspace.curated`. O catálogo pode ser ajustado na variável `CATALOG` do
+`workspace.curated`. O catálogo e o schema de origem ficam nas variáveis do
 notebook core.
 
 ## Tecnologias
 
 | Tecnologia | Uso no projeto |
 |---|---|
-| Databricks | Execução dos notebooks, Jobs e dashboard |
+| Databricks | Execução dos notebooks, Jobs e dashboard Lakeview |
 | PySpark | Leitura, tratamento e transformação dos dados |
 | Delta Lake | Armazenamento das tabelas de cada camada |
-| Neon (PostgreSQL) | Fonte de dados operacional do Apollo |
+| Neon (PostgreSQL) | Banco operacional do Apollo, fonte do BI |
 | JDBC | Conexão entre Databricks e Neon |
 | Databricks Secrets | Guarda segura das credenciais |
+| React | Web do Apollo, onde o dashboard é embutido |
 | GitHub | Versionamento e revisão do código |
 
 ## Como executar
@@ -156,7 +196,7 @@ Rode os notebooks de `apollo_pipeline` nesta ordem:
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `CATALOG` | `workspace` | Catálogo onde as camadas são criadas |
-| `NEON_SCHEMA` | `public` | Schema de origem no Neon (ajustar se o BI ler outro, como o data mart) |
+| `NEON_SCHEMA` | `public` | Schema de origem no Neon (ajustar para o schema que o BI lê) |
 | `SECRET_SCOPE` | `apollo` | Escopo dos secrets no Databricks |
 
 ## Requisitos da disciplina: Business Intelligence
@@ -167,14 +207,14 @@ maio de 2026.
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
 | Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated` |
-| Gráficos de barra e linha | ⏳ | Planejado no dashboard |
-| Cards de KPIs e desvios | ⏳ | Planejado no dashboard |
-| Histogramas e boxplots | ⏳ | Planejado no dashboard |
-| Mapa, se houver dados geográficos | ⏳ | A avaliar conforme os dados de localização das placas |
+| Gráficos de barra e linha | ⏳ | Evolução e comparação dos IS por filial e período |
+| Cards de KPIs e desvios | ⏳ | Um card por IS e para o IS Geral |
+| Histogramas e boxplots | ⏳ | Distribuição dos IS e da saúde das strings |
+| Mapa, se houver dados geográficos | ⏳ | A confirmar se `address` traz coordenadas das filiais |
 | Filtros interativos (período, filial) | ⏳ | Planejado no dashboard |
 | Relatório gerencial | ⏳ | Apresentação da base, problema, tratamento e KPIs |
-| Pipeline no Databricks (leitura, tratamento, KPIs, base final) | 🚧 | Estrutura criada em `apollo_pipeline`; KPIs ainda por implementar |
-| Pipeline usando a fonte gerada pela aplicação | 🚧 | Notebook core criado; falta validar com o schema definitivo |
+| Pipeline no Databricks (leitura, tratamento, KPIs, base final) | 🚧 | Estrutura criada em `apollo_pipeline`; cálculo dos IS ainda por implementar |
+| Pipeline usando a fonte gerada pela aplicação | 🚧 | Notebook core criado; falta validar com o schema definitivo do Neon |
 | Job para executar o pipeline sem rodar célula por célula | ⏳ | Planejado |
 | Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Planejado |
 
@@ -182,12 +222,13 @@ maio de 2026.
 
 ## Próximos passos
 
-- Validar o schema de origem no Neon e ajustar `NEON_SCHEMA`;
+- Confirmar o schema de origem no Neon e ajustar `NEON_SCHEMA`;
 - executar o `raw_ingest` e conferir as tabelas geradas;
-- implementar os KPIs e os índices na camada `curated`;
+- mapear quais colunas do banco alimentam cada IS e implementar o cálculo na camada `curated`;
 - criar o Job com as três etapas em sequência;
 - construir o dashboard a partir da base `curated`;
-- adicionar a restrição de acesso por filial (Row Filter) quando os dashboards estiverem finalizados;
+- adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
+- deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação;
 - escrever o relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
 
 ## Contribuição
