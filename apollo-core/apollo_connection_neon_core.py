@@ -53,6 +53,7 @@ VIEWS = [
     "dim_inverter", "dim_string", "dim_panel", "dim_employee", "dim_date",
     "fact_string_daily_performance", "fact_string_health", "fact_maintenance",
     "fact_part_consumption", "fact_daily_active_user", "vw_maintenance_chain",
+    "dim_maintenance_type", "dim_part", "fact_warning", "fact_relocation", "fact_stock"
 ]
 
 # COMMAND ----------
