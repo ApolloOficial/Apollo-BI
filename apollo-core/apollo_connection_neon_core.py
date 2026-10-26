@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC ## Conexão com a base de dados Apollo
-# MAGIC Esse notebook conecta o Databricks ao banco do Apollo no Neon, define a lista das 15 views do schema dm que o BI usa e cria os schemas raw, cleaned e curated. Os notebooks do pipeline reutilizam o que é definido aqui.
+# MAGIC Esse notebook conecta o Databricks ao banco do Apollo no Neon, define a lista das 20 views do schema dm que o BI usa e cria os schemas raw, cleaned e curated. Os notebooks do pipeline reutilizam o que é definido aqui.
 
 # COMMAND ----------
 
@@ -41,7 +41,7 @@ def read_data(table):
 
 # MAGIC %md
 # MAGIC #### Definir o que o BI vai ler
-# MAGIC Catálogo onde as tabelas ficam e as 15 views do schema `dm` (dimensões, fatos e a cadeia de manutenção).
+# MAGIC Catálogo onde as tabelas ficam e as 20 views do schema `dm` (dimensões, fatos e a cadeia de manutenção).
 
 # COMMAND ----------
 
