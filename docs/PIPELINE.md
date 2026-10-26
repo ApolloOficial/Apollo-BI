@@ -111,14 +111,11 @@ Parâmetros do cálculo, na célula de parâmetros do notebook `apollo_curated_o
 
 | Parâmetro | Valor | Situação |
 |---|---|---|
-| `LIMIAR_SAUDE` | 80 | Definido pelo grupo para o BI: strings com saúde abaixo de 80 contam como abaixo do limiar |
+| `LIMIAR_SAUDE` | 70 | Definido pelo grupo para o BI: igual ao alerta do sistema, strings com saúde abaixo de 70 contam como abaixo do limiar |
 | `PADRAO_MIN` | 0,80 | Definido pelo grupo: razão pico/nominal mínima para estar dentro do padrão da etiqueta |
 | `QUEDA_BRUSCA_PTS` | 10 | Definido pelo grupo: queda de saúde entre duas medições que conta como queda brusca |
 | `META_IS` | 80 | Definido pelo grupo: meta do IS Geral |
 | `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS |
-
-> O alerta do sistema abre com saúde abaixo de 70. O BI usa 80 como limiar de atenção,
-> então a contagem de strings abaixo do limiar no dashboard não é a mesma dos alertas.
 
 ## Funcionalidades previstas
 
