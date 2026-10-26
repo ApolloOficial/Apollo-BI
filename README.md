@@ -5,12 +5,13 @@
 ### Métricas de saúde e sustentabilidade dos ativos solares do Apollo
 
 Pipeline de dados em arquitetura medalhão no **Databricks**, que lê o data mart do
-Apollo no Neon, calcula os KPIs e os índices de sustentabilidade (IS) e alimenta o
-dashboard embutido na web.
+Apollo no Neon e o tracking do app mobile no MongoDB, calcula os KPIs e os índices de
+sustentabilidade (IS) e alimenta o dashboard embutido na web.
 
 [![Databricks](https://img.shields.io/badge/Databricks-Free_Edition-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://www.databricks.com/)
 [![Python](https://img.shields.io/badge/PySpark-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://spark.apache.org/docs/latest/api/python/)
 [![Neon](https://img.shields.io/badge/Neon-PostgreSQL-00E599?style=for-the-badge&logo=postgresql&logoColor=white)](https://neon.tech/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/atlas)
 [![Delta Lake](https://img.shields.io/badge/Delta_Lake-Medalh%C3%A3o-00ADD4?style=for-the-badge)](https://delta.io/)
 [![GitHub](https://img.shields.io/badge/GitHub-Git_folders-181717?style=for-the-badge&logo=github&logoColor=white)](https://docs.databricks.com/aws/en/repos/)
 
@@ -20,14 +21,9 @@ dashboard embutido na web.
 
 ## Sobre o projeto
 
-O **Apollo** é uma plataforma SaaS multi-tenant para gestão do ciclo de vida de
-ativos fotovoltaicos em empresas industriais. O inversor mede o desempenho de cada
-string, e o Apollo usa esse dado real para gerar alertas, ordens de serviço e
-realocações de placas.
-
-O **Apollo BI** é a camada de análise dessa plataforma. Ele lê o data mart do Apollo
-no Neon, trata os dados em três camadas e calcula os KPIs e os índices que aparecem
-na aba **Métricas** da web. O **Gerente** e o **Analista** acessam o dashboard e veem
+O **Apollo BI** é a camada de análise da plataforma SaaS multi-tenant Apollo. Ele lê o data mart do Apollo
+no Neon e o tracking do app mobile no MongoDB, trata os dados em três camadas e calcula os KPIs e os índices que aparecem
+na aba **Métricas** da web. O **Gerente** acessa o dashboard e vê
 apenas a própria filial.
 
 > A unidade monitorada no Apollo é a **string**. A hierarquia dos ativos é:
@@ -35,7 +31,16 @@ apenas a própria filial.
 
 ## Dados de origem
 
-A fonte é o banco do Apollo no Neon (PostgreSQL, 24 tabelas). O BI não lê as tabelas
+O pipeline tem duas fontes, cada uma com a sua trilha de notebooks:
+
+| Fonte | Trilha | O que traz |
+|---|---|---|
+| Neon (PostgreSQL), schema `dm` | `operacional` | Dados operacionais do Apollo: ativos, saúde, manutenção, alertas, realocação e estoque |
+| MongoDB, coleção `tracking_events` | `tracking` | Eventos de uso do app mobile: telas, ações de toque, chamadas de API e sessões |
+
+### Neon: dados operacionais
+
+A fonte é o banco do Apollo no Neon (PostgreSQL, 32 tabelas). O BI não lê as tabelas
 operacionais direto: ele lê o schema **`dm`** (data mart), que expõe 20 views.
 
 | Tipo | Views do `dm` |
@@ -45,11 +50,26 @@ operacionais direto: ele lê o schema **`dm`** (data mart), que expõe 20 views.
 | Apoio | `vw_maintenance_chain` (cadeia de OS filhas, usada para medir retrabalho) |
 
 As views `dim_maintenance_type`, `dim_part`, `fact_warning`, `fact_relocation` e
-`fact_stock` foram criadas para o BI. O script está em `dm_novas_views.sql`.
+`fact_stock` foram criadas para o BI.
 
 As medições por string (`power_w`, `voltage_v`, `current_a`, `generated_energy_kwh`,
 `fault_code`) vêm do inversor. Na demonstração, elas são geradas por um simulador, e
 a coluna `data_source` registra a origem de cada leitura.
+
+### MongoDB: tracking do mobile
+
+A coleção `tracking_events` guarda um documento por evento do app. Os campos aninhados
+em `properties` são achatados para colunas (`properties_duration_ms`,
+`properties_http_status` e outras).
+
+| Evento (`event_name`) | O que registra |
+|---|---|
+| `app_opened`, `app_foregrounded` | Abertura e retorno do app |
+| `screen_viewed`, `screen_exited` | Tela exibida e tempo de permanência |
+| `ui_action` | Toque do usuário (alvo e forma de entrada) |
+| `api_request_completed` | Chamada de API (endpoint, status HTTP e latência) |
+
+O tracking traz `company_id`, mas não a filial. Por isso os KPIs dele são por empresa.
 
 ## Índices de sustentabilidade (IS)
 
@@ -76,7 +96,9 @@ Como cada IS é calculado:
 
 ## KPIs calculados
 
-Além dos IS, a camada `curated` entrega KPIs para o dashboard:
+Além dos IS, a camada `curated` entrega KPIs para o dashboard.
+
+### Trilha operacional
 
 | Tabela da `curated` | Conteúdo |
 |---|---|
@@ -90,21 +112,38 @@ Além dos IS, a camada `curated` entrega KPIs para o dashboard:
 | `kpi_is_string`, `kpi_is_filial` | IS Energético, IS Ambiental e IS Geral |
 | `dim_filial_mapa` | Cidade, estado e indicadores de risco de cada filial |
 
-Parâmetros do cálculo, na célula de parâmetros do notebook `apollo_curated`:
+### Trilha tracking
+
+| Tabela da `curated` | Conteúdo |
+|---|---|
+| `kpi_tracking_diario_empresa` | Eventos, sessões, usuários ativos e aberturas do app por dia |
+| `kpi_tracking_sessao` | Uma linha por sessão: duração, eventos e telas distintas |
+| `kpi_tracking_tela` | Visualizações e tempo médio e mediano por tela |
+| `kpi_tracking_acoes` | Toques por tela, alvo e forma de entrada |
+| `kpi_tracking_api_diaria` | Requisições, erros, taxa de erro e latência (média e p95) por endpoint |
+
+O dia do evento usa o horário de São Paulo. Status HTTP a partir de 400 conta como erro.
+
+### Parâmetros
+
+Parâmetros do cálculo, na célula de parâmetros do notebook `apollo_curated_operacional`:
 
 | Parâmetro | Valor | Situação |
 |---|---|---|
-| `LIMIAR_SAUDE` | 70 | Definido no projeto |
-| `PADRAO_MIN` | 0,80 | A definir pelo grupo |
-| `QUEDA_BRUSCA_PTS` | 5 | A definir pelo grupo |
-| `META_IS` | 80 | A definir pelo grupo |
-| `META_RESOLUCAO_DIAS` | 7 | A definir pelo grupo |
+| `LIMIAR_SAUDE` | 80 | Definido pelo grupo para o BI: strings com saúde abaixo de 80 contam como abaixo do limiar |
+| `PADRAO_MIN` | 0,80 | Definido pelo grupo: razão pico/nominal mínima para estar dentro do padrão da etiqueta |
+| `QUEDA_BRUSCA_PTS` | 10 | Definido pelo grupo: queda de saúde entre duas medições que conta como queda brusca |
+| `META_IS` | 80 | Definido pelo grupo: meta do IS Geral |
+| `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS |
+
+> O alerta do sistema abre com saúde abaixo de 70. O BI usa 80 como limiar de atenção,
+> então a contagem de strings abaixo do limiar no dashboard não é a mesma dos alertas.
 
 ## Funcionalidades previstas
 
-- Conexão com o Neon por JDBC, com credenciais em um arquivo `.env` lido com `python-dotenv`;
-- ingestão das 20 views do `dm` sem alteração na camada `raw`;
-- limpeza na camada `cleaned`: nulo escrito como texto vira nulo e linhas com chave nula são removidas;
+- Conexão com o Neon por JDBC e com o MongoDB por `pymongo`, com credenciais em um arquivo `.env` lido com `python-dotenv`;
+- ingestão das 20 views do `dm` e da coleção `tracking_events` sem alteração de valores na camada `raw`;
+- limpeza na camada `cleaned`: 16 tratamentos na trilha operacional e 10 na trilha tracking, com o efeito de cada um registrado em `cleaning_log` e `cleaning_log_mongo`;
 - cálculo dos KPIs e dos IS na camada `curated`;
 - dashboard (Lakeview) embutido na aba Métricas da web;
 - acesso restrito por filial (Row Filter) para Gerente e Analista;
@@ -120,7 +159,9 @@ flowchart LR
     I[Inversor ou simulador] --> N[(Neon PostgreSQL)]
     N --> DM[Views do schema dm]
     DM --> C[Notebook core]
+    M[App mobile] --> MG[(MongoDB tracking_events)]
     C --> R[raw]
+    MG --> R
     R --> CL[cleaned]
     CL --> CU[curated]
     CU --> D[Dashboard Lakeview]
@@ -132,26 +173,42 @@ flowchart LR
 
 | Camada | Equivalente medalhão | O que contém |
 |---|---|---|
-| `raw` | Bronze | Cópia fiel das 20 views do `dm`, sem alterar os dados |
-| `cleaned` | Silver | As mesmas 20 tabelas, com nulo escrito como texto convertido em nulo e sem linhas de chave nula |
-| `curated` | Gold | KPIs e IS por string e por filial, prontos para o dashboard |
+| `raw` | Bronze | Cópia fiel das 20 views do `dm` e da coleção `tracking_events` (tudo como texto), sem alterar os dados |
+| `cleaned` | Silver | As mesmas tabelas, com tipos convertidos e os tratamentos de qualidade aplicados |
+| `curated` | Gold | KPIs e IS prontos para o dashboard |
+
+Tratamentos da `cleaned`:
+
+| Trilha | Tratamentos |
+|---|---|
+| `operacional` (16) | Espaços extras, nulo escrito como texto, caixa e grafia das categorias, categoria fora do domínio, NaN e infinito, negativo impossível, valor fora da faixa, outlier extremo de geração, data no futuro, data de preenchimento padrão, ordem cronológica, linha duplicada, chave nula, chave duplicada e chave estrangeira órfã |
+| `tracking` (10) | Espaços extras, nulo escrito como texto, caixa das categorias, UUID inválido, conversão de tipos, NaN e infinito, valor fora da faixa, data impossível, evento sem campo obrigatório e evento duplicado |
+
+Cada notebook da `cleaned` grava uma tabela de log (`cleaning_log` e `cleaning_log_mongo`)
+com as linhas removidas e os nulos criados por tratamento. Elas são a evidência da etapa
+de tratamento para o relatório gerencial.
 
 ```text
 apollo-bi/
 ├── apollo-core/
 │   ├── apollo_connection_neon_core    # Conexão com o Neon, lista de views e criação dos schemas
-│   └── apollo_connection_test         # Teste da conexão (conta as views e mostra os dados)
+│   ├── apollo_connection_test         # Teste da conexão com o Neon (conta as views e mostra os dados)
+│   └── apollo_connection_mongo_test   # Teste da conexão com o MongoDB (ping, coleções e conversão)
 ├── apollo-pipeline/
-│   ├── apollo_raw                     # Neon (dm) para a camada raw
-│   ├── apollo_cleaned                 # raw para a camada cleaned
-│   └── apollo_curated                 # cleaned para a camada curated (KPIs e IS)
+│   ├── apollo_raw_operacional         # Neon (dm) para a camada raw
+│   ├── apollo_cleaned_operacional     # raw para a camada cleaned
+│   ├── apollo_curated_operacional     # cleaned para a camada curated (KPIs e IS)
+│   ├── apollo_raw_tracking            # MongoDB (tracking_events) para a camada raw
+│   ├── apollo_cleaned_tracking        # raw para a camada cleaned
+│   └── apollo_curated_tracking        # cleaned para a camada curated (KPIs de uso do app)
 ├── apollo_manager/                    # Dashboard principal (a criar)
 └── README.md
 ```
 
 As tabelas são salvas como `workspace.raw`, `workspace.cleaned` e
 `workspace.curated`. O catálogo, o schema de origem e a lista de views ficam nas
-variáveis do notebook core.
+variáveis do notebook core. Os notebooks da trilha `tracking` não usam o core e
+podem rodar em paralelo com os da trilha `operacional`.
 
 ## Tecnologias
 
@@ -161,7 +218,9 @@ variáveis do notebook core.
 | PySpark | Leitura, tratamento e transformação dos dados |
 | Delta Lake | Armazenamento das tabelas de cada camada |
 | Neon (PostgreSQL) | Banco operacional do Apollo, fonte do BI |
+| MongoDB Atlas | Tracking de uso do app mobile, fonte do BI |
 | JDBC | Conexão entre Databricks e Neon |
+| pymongo | Conexão entre Databricks e MongoDB |
 | python-dotenv | Leitura das credenciais do Neon a partir do arquivo `.env` |
 | React | Web do Apollo, onde o dashboard é embutido |
 | GitHub | Versionamento e revisão do código |
@@ -173,7 +232,8 @@ variáveis do notebook core.
 - Conta própria no Databricks Free Edition (cada integrante usa a sua);
 - Conta no GitHub com permissão de escrita neste repositório;
 - Personal Access Token do GitHub com escopo `repo`;
-- as views do `dm` criadas no Neon (inclusive as 5 novas, de `dm_novas_views.sql`).
+- as views do `dm` criadas no Neon, inclusive as 5 novas;
+- acesso ao MongoDB: no Atlas, em **Network Access**, o IP do Databricks precisa estar liberado (o Free Edition não tem IP fixo, então a liberação é `0.0.0.0/0`).
 
 > Não é preciso instalar nada na máquina. Todo o processamento roda no Databricks.
 
@@ -192,27 +252,39 @@ https://github.com/<ORGANIZACAO>/<REPOSITORIO>.git
 
 Depois, troque para a sua branch no menu de branches, no topo da pasta.
 
-### 3. Configure as credenciais do Neon
+### 3. Configure as credenciais do Neon e do MongoDB
 
-Cada integrante cria o seu arquivo `.env` com o host, o banco, o usuário e a senha
-do Neon. Os nomes das variáveis são os que o `apollo_connection_neon_core` lê. Os
-valores vêm da connection string do projeto no painel do Neon.
+Cada integrante cria o seu arquivo `.env` na raiz da Git folder:
+
+| Variável | Fonte | Lida por |
+|---|---|---|
+| `NEON_HOST`, `NEON_DB`, `NEON_USER`, `NEON_PASSWORD` | Connection string do projeto no painel do Neon | `apollo_connection_neon_core` |
+| `MONGO_URI` | Connection string do cluster no painel do Atlas | notebooks da trilha `tracking` |
+| `MONGO_DB` | Nome do banco, só se não estiver na `MONGO_URI` | notebooks da trilha `tracking` |
 
 > O `.env` fica fora do repositório. Nunca escreva credenciais em notebooks, commits
 > ou mensagens do grupo.
 
-### 4. Teste a conexão
+### 4. Teste as conexões
 
-Abra `apollo-core/apollo_connection_test` e use **Run all**. O resultado esperado é
-a contagem das 20 views do `dm` e a exibição dos dados.
+- `apollo-core/apollo_connection_test`: use **Run all**. O resultado esperado é a contagem das 20 views do `dm` e a exibição dos dados;
+- `apollo-core/apollo_connection_mongo_test`: troque `NOME_DA_COLECAO` por `tracking_events` e use **Run all**. O resultado esperado é o `ping`, a lista de coleções com as contagens e uma amostra dos eventos.
 
 ### 5. Execute o pipeline
 
-Rode os notebooks de `apollo-pipeline` nesta ordem:
+Rode os notebooks de `apollo-pipeline` nesta ordem. As duas trilhas são independentes
+e podem rodar em paralelo, mas dentro de cada trilha a ordem é fixa:
 
-1. `apollo_raw`
-2. `apollo_cleaned`
-3. `apollo_curated`
+| Etapa | Trilha operacional | Trilha tracking |
+|---|---|---|
+| 1 | `apollo_raw_operacional` | `apollo_raw_tracking` |
+| 2 | `apollo_cleaned_operacional` | `apollo_cleaned_tracking` |
+| 3 | `apollo_curated_operacional` | `apollo_curated_tracking` |
+
+### 6. Job
+
+O Job executa as seis tarefas na ordem acima, com as etapas da mesma trilha encadeadas.
+O Job precisa usar a pasta onde está o `.env`, porque o arquivo não vai para o Git.
 
 ## Configuração do notebook core
 
@@ -230,31 +302,30 @@ maio de 2026.
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
 | Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated` |
-| Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês |
-| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar de 70, IS Geral contra a meta, tempo de resolução contra a meta |
-| Histogramas e boxplots | ⏳ | Distribuição da saúde das strings e do tempo de resolução das OS |
+| Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês; uso do app por dia |
+| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta |
+| Histogramas e boxplots | ⏳ | Distribuição da saúde das strings, da duração das sessões e do tempo de resolução das OS |
 | Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
-| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard |
-| Relatório gerencial | ⏳ | Apresentação da base, problema, tratamento e KPIs |
-| Pipeline no Databricks (leitura, tratamento, KPIs, base final) | 🚧 | `apollo_raw`, `apollo_cleaned` e `apollo_curated` escritos; falta executar a cleaned e a curated com as 20 views |
-| Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw` lê o schema `dm` do Neon |
-| Job para executar o pipeline sem rodar célula por célula | ⏳ | Planejado |
+| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
+| Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
+| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Seis notebooks escritos (duas trilhas); falta validar a execução completa |
+| Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
+| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ⏳ | Planejado |
+| Dashboard construído a partir da base final do pipeline | ⏳ | Será lido do schema `workspace.curated` |
 | Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Planejado |
+| Relatório explica o fluxo, as etapas automatizadas e a relação com KPIs e dashboard | ⏳ | Planejado |
 
 **Legenda:** ✅ concluído · 🚧 em desenvolvimento · ⏳ planejado
 
 ## Próximos passos
 
-- Incluir as 5 views novas em `VIEWS` no notebook core e executar o `apollo_raw` com as 20 views;
-- executar o `apollo_cleaned` e conferir as linhas removidas por tabela;
-- preencher `warranty_years` no `panel_model` para o IS Ambiental sair do nulo;
-- definir em grupo `PADRAO_MIN`, `QUEDA_BRUSCA_PTS`, `META_IS` e `META_RESOLUCAO_DIAS`;
-- executar o `apollo_curated` e validar as tabelas geradas;
-- criar o Job com as três etapas em sequência;
+- Validar a execução completa dos seis notebooks no Databricks;
+- criar a tabela `kpi_os_resolucao` (uma linha por OS) para o boxplot do tempo de resolução;
+- criar o Job com as seis tarefas e guardar a evidência (configuração, histórico, status e resultado);
 - construir o dashboard a partir da base `curated`;
+- escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
 - adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
-- deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação;
-- escrever o relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
+- deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação.
 
 ## Contribuição
 
@@ -275,7 +346,8 @@ Fluxo do dia a dia:
 3. edite apenas o notebook combinado e rode para testar;
 4. faça **Commit & Push** e abra o Pull Request.
 
-Os notebooks são versionados em formato `.py`, o que mantém o diff legível no GitHub.
+O notebook `apollo_connection_neon_core` é versionado em `.py` e os demais em `.ipynb`.
+Limpe as saídas das células antes de fazer o commit.
 
 ---
 
