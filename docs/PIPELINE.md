@@ -86,6 +86,7 @@ Além dos IS, a camada `curated` entrega KPIs para o dashboard.
 | `kpi_saude_string`, `kpi_saude_filial`, `kpi_saude_diaria_filial` | Saúde atual, % de strings abaixo de 70 e evolução diária |
 | `kpi_producao_filial_mes` | Energia gerada, kWh por kWp e leituras com falha |
 | `kpi_manutencao_filial_mes`, `kpi_os_por_tipo` | Status das OS, atrasadas, tempo de resolução, custo, desvio de orçamento, cancelamento e retrabalho |
+| `kpi_os_resolucao` | Uma linha por OS concluída: dias de resolução, custo e se ficou dentro da meta de 7 dias |
 | `kpi_ativos_filial` | Placas por status e taxa de ativação |
 | `kpi_alertas_filial` | Alertas por status, alertas sem OS e horas até a OS |
 | `kpi_realocacao_filial` | Solicitações de realocação, internas e externas |
@@ -279,14 +280,14 @@ maio de 2026.
 
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
-| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated` |
+| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated`; o desenho está em [DASHBOARD.md](DASHBOARD.md) |
 | Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês; uso do app por dia |
 | Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta |
 | Histogramas e boxplots | ⏳ | Distribuição da saúde das strings, da duração das sessões e do tempo de resolução das OS |
 | Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
 | Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
 | Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
-| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Seis notebooks escritos (duas trilhas); falta validar a execução completa |
+| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | ✅ | Seis notebooks executados com sucesso no Databricks (duas trilhas); a `curated` tem 20 tabelas |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
 | Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ⏳ | Planejado |
 | Dashboard construído a partir da base final do pipeline | ⏳ | Será lido do schema `workspace.curated` |
@@ -297,10 +298,8 @@ maio de 2026.
 
 ## Próximos passos
 
-- Validar a execução completa dos seis notebooks no Databricks;
-- criar a tabela `kpi_os_resolucao` (uma linha por OS) para o boxplot do tempo de resolução;
 - criar o Job com as seis tarefas e guardar a evidência (configuração, histórico, status e resultado);
-- construir o dashboard a partir da base `curated`;
+- construir o dashboard a partir da base `curated`, seguindo o desenho de [DASHBOARD.md](DASHBOARD.md);
 - escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
 - adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
 - deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação.
