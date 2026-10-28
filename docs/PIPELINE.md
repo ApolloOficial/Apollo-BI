@@ -64,7 +64,7 @@ O tracking traz `company_id`, mas não a filial. Por isso os KPIs dele são por 
 Regras de cálculo definidas pelo grupo:
 
 - Tudo o que não existir no banco atual fica de fora do cálculo. O schema não será alterado para isso;
-- cada IS é calculado por string e depois agregado por filial;
+- cada IS é calculado por string e depois agregado por filial, no total do histórico (`kpi_is_filial`) e por dia (`kpi_is_filial_diario`);
 - não existe tabela por painel na camada final.
 
 Como cada IS é calculado:
@@ -74,6 +74,12 @@ Como cada IS é calculado:
   O segundo é a parcela das medições de saúde sem queda brusca (`health_delta`);
 - **IS Ambiental:** parcela da garantia que ainda resta, a partir da idade média das
   placas instaladas e ativas da string.
+
+IS por dia: as mesmas regras valem para cada dia. O IS Energético usa as leituras e as
+medições do dia, e o IS Ambiental usa as placas já instaladas e ainda ativas naquele dia.
+O IS de uma semana ou de um mês é a média dos IS diários do período, calculada no
+dashboard. O IS acumulado (`kpi_is_filial`) continua disponível e não muda com o filtro de
+período.
 
 ## KPIs calculados
 
@@ -91,7 +97,8 @@ Além dos IS, a camada `curated` entrega KPIs para o dashboard.
 | `kpi_alertas_filial` | Alertas por status, alertas sem OS e horas até a OS |
 | `kpi_realocacao_filial` | Solicitações de realocação, internas e externas |
 | `kpi_estoque_peca`, `kpi_estoque_filial` | Estoque de peças e itens abaixo do mínimo |
-| `kpi_is_string`, `kpi_is_filial` | IS Energético, IS Ambiental e IS Geral |
+| `kpi_is_string`, `kpi_is_filial` | IS Energético, IS Ambiental e IS Geral de todo o histórico, por string e por filial |
+| `kpi_is_filial_diario` | IS Energético, IS Ambiental, IS Geral e desvio da meta por filial e dia |
 | `dim_filial_mapa` | Cidade, estado e indicadores de risco de cada filial |
 
 ### Trilha tracking
@@ -298,12 +305,12 @@ maio de 2026.
 
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
-| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated`; o desenho está em [DASHBOARD.md](DASHBOARD.md) |
+| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated`; o desenho está em [DASHBOARD.md](DASHBOARD.md) e as consultas em [DASHBOARD_DATASETS.md](DASHBOARD_DATASETS.md) |
 | Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês; uso do app por dia |
-| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta |
+| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta, com comparação da semana e do mês atuais contra os anteriores |
 | Histogramas e boxplots | ⏳ | Distribuição da saúde das strings, da duração das sessões e do tempo de resolução das OS |
 | Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
-| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
+| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard: período (dia, semana ou mês), filial e empresa; o tracking filtra por empresa, não por filial |
 | Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
 | Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Ingestão em notebooks e pipeline declarativa `Apollo_BI` (`cleaned` e `curated`) escritas; falta executar no Databricks |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
@@ -316,8 +323,9 @@ maio de 2026.
 
 ## Próximos passos
 
+- criar a pipeline `Apollo_BI` no Databricks, executar e validar a execução completa;
 - montar o Job que encadeia as ingestões e a pipeline `Apollo_BI`, e guardar a evidência (configuração, histórico, status e resultado);
-- construir o dashboard a partir da base `curated`, seguindo o desenho de [DASHBOARD.md](DASHBOARD.md);
+- construir o dashboard a partir da base `curated`, seguindo o desenho de [DASHBOARD.md](DASHBOARD.md) e as consultas de [DASHBOARD_DATASETS.md](DASHBOARD_DATASETS.md);
 - escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
 - adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
 - deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação.

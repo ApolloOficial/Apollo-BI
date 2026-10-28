@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC ## Cálculo dos KPIs: cleaned para curated
-# MAGIC Fonte da pipeline `Apollo_BI` (camada Gold). Lê as 20 tabelas da camada `cleaned`, calcula os KPIs de saúde, produção, manutenção, ativos, alertas, realocação e estoque, calcula os IS Energético e Ambiental por string e por filial, e define cada tabela da camada `curated` com `@dp.materialized_view()`. A `curated` é a base final do dashboard.
+# MAGIC Fonte da pipeline `Apollo_BI` (camada Gold). Lê as 20 tabelas da camada `cleaned`, calcula os KPIs de saúde, produção, manutenção, ativos, alertas, realocação e estoque, calcula os IS Energético e Ambiental por string, por filial e por dia, e define cada tabela da camada `curated` com `@dp.materialized_view()`. A `curated` é a base final do dashboard.
 
 # COMMAND ----------
 
@@ -451,6 +451,90 @@ def is_por_filial(is_string):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC #### Índices de sustentabilidade por dia
+# MAGIC Mesmas regras do IS acumulado, aplicadas a cada dia. O IS semanal e o mensal são a média dos IS diários do período, calculada no dashboard.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### IS Energético por string e dia
+
+# COMMAND ----------
+
+def is_energetico_string_dia():
+    dias = calendario().select("date_key", "full_date")
+
+    desempenho = (read_cleaned("fact_string_daily_performance")
+                  .join(dias, "date_key")
+                  .withColumn("no_padrao", (F.col("peak_to_nominal_ratio") >= PADRAO_MIN).cast("int"))
+                  .groupBy("string_key", "full_date")
+                  .agg(F.avg("no_padrao").alias("pct_no_padrao")))
+
+    saude = (read_cleaned("fact_string_health")
+             .filter(F.col("health_delta").isNotNull())
+             .join(dias, "date_key")
+             .withColumn("sem_queda", (F.col("health_delta") > -QUEDA_BRUSCA_PTS).cast("int"))
+             .groupBy("string_key", "full_date")
+             .agg(F.avg("sem_queda").alias("pct_sem_queda")))
+
+    df = desempenho.join(saude, ["string_key", "full_date"], "outer")
+    media = (F.coalesce(F.col("pct_no_padrao"), F.col("pct_sem_queda")) + F.coalesce(F.col("pct_sem_queda"), F.col("pct_no_padrao"))) / 2
+    return df.withColumn("is_energetico", F.round(100 * media, 2)).select("string_key", "full_date", "is_energetico")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### IS Ambiental por string e dia
+# MAGIC Usa as placas instaladas e ainda ativas em cada dia. Calcula só para os dias que têm IS Energético.
+
+# COMMAND ----------
+
+def is_ambiental_string_dia(dias_da_string):
+    placas = (read_cleaned("dim_panel")
+              .filter(F.col("installation_dt").isNotNull())
+              .select("string_key", "installation_dt", "deactivated_at"))
+
+    ja_instalada = F.col("installation_dt") <= F.col("full_date")
+    ainda_ativa = F.col("deactivated_at").isNull() | (F.col("deactivated_at") > F.col("full_date"))
+    placas_ativas = dias_da_string.join(placas, "string_key").filter(ja_instalada & ainda_ativa)
+
+    idade = placas_ativas.groupBy("string_key", "full_date").agg(
+        F.avg(F.datediff(F.col("full_date"), F.col("installation_dt")) / 365.25).alias("idade_media_anos"))
+
+    garantia = string_unit().select("string_key", "panel_model_key").join(
+        read_cleaned("dim_panel_model").select("panel_model_key", "warranty_years"), "panel_model_key")
+
+    df = idade.join(garantia, "string_key")
+    restante = (1 - F.col("idade_media_anos") / F.col("warranty_years")) * 100
+    is_ambiental = F.when(F.col("warranty_years") > 0, F.greatest(F.lit(0.0), F.least(F.lit(100.0), restante)))
+    return df.select("string_key", "full_date", F.round(is_ambiental, 2).alias("is_ambiental"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##### IS por filial e dia
+
+# COMMAND ----------
+
+def is_por_filial_dia():
+    energetico = is_energetico_string_dia()
+    ambiental = is_ambiental_string_dia(energetico.select("string_key", "full_date"))
+
+    por_string = energetico.join(ambiental, ["string_key", "full_date"], "left")
+    por_string = por_string.join(string_unit().select("string_key", "company_unit_key"), "string_key")
+
+    df = por_string.groupBy("company_unit_key", "full_date").agg(
+        F.round(F.avg("is_energetico"), 2).alias("is_energetico"),
+        F.round(F.avg("is_ambiental"), 2).alias("is_ambiental"),
+    )
+    geral = (F.coalesce(F.col("is_energetico"), F.col("is_ambiental")) + F.coalesce(F.col("is_ambiental"), F.col("is_energetico"))) / 2
+    df = (df.withColumn("is_geral", F.round(geral, 2))
+            .withColumn("desvio_meta", F.round(F.col("is_geral") - META_IS, 2)))
+    return df.join(unit_info().select("company_unit_key", "company_key", "unit_name"), "company_unit_key")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC #### Mapa de filiais
 
 # COMMAND ----------
@@ -597,6 +681,15 @@ def kpi_is_string():
 )
 def kpi_is_filial():
     return is_por_filial(read_curated("kpi_is_string"))
+
+# COMMAND ----------
+
+@dp.materialized_view(
+    name=f"{CURATED}.kpi_is_filial_diario",
+    comment="IS Energético, IS Ambiental, IS Geral e desvio da meta por filial e dia"
+)
+def kpi_is_filial_diario():
+    return is_por_filial_dia()
 
 # COMMAND ----------
 
