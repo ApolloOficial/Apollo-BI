@@ -57,7 +57,7 @@ O tracking traz `company_id`, mas não a filial. Por isso os KPIs dele são por 
 | Índice | O que mede | Situação |
 |---|---|---|
 | **IS Energético** | Queda brusca na captação e desempenho abaixo do padrão da etiqueta do equipamento | Calculado |
-| **IS Ambiental** | Vida útil do painel, usando a garantia do modelo de placa como vida útil | Calculado (precisa de `warranty_years` preenchido no `panel_model`) |
+| **IS Ambiental** | Vida útil do painel, usando a garantia do modelo de placa como vida útil | Calculado (se o modelo não tem `warranty_years`, vale `VIDA_UTIL_PADRAO_ANOS`) |
 | **IS Financeiro** | Custo do painel comparado ao que seria pago de energia sem o sistema | Fora do cálculo: não existem consumo e tarifa no banco |
 | **IS Geral** | Média dos IS calculados (Energético e Ambiental), por filial | Calculado |
 
@@ -72,8 +72,10 @@ Como cada IS é calculado:
 - **IS Energético:** média de dois percentuais por string. O primeiro é a parcela dos
   dias com pico de potência dentro do padrão da etiqueta (`peak_to_nominal_ratio`).
   O segundo é a parcela das medições de saúde sem queda brusca (`health_delta`);
-- **IS Ambiental:** parcela da garantia que ainda resta, a partir da idade média das
-  placas instaladas e ativas da string.
+- **IS Ambiental:** parcela da vida útil que ainda resta, a partir da idade média das
+  placas instaladas e ativas da string. A vida útil é a garantia do modelo de placa
+  (`warranty_years`). O dataload atual do banco não preenche esse campo, então o pipeline
+  usa `VIDA_UTIL_PADRAO_ANOS` nesses casos; com valor 0 o IS Ambiental fica vazio.
 
 IS por dia: as mesmas regras valem para cada dia. O IS Energético usa as leituras e as
 medições do dia, e o IS Ambiental usa as placas já instaladas e ainda ativas naquele dia.
@@ -124,6 +126,7 @@ Parâmetros do cálculo, no início de `apollo-pipeline/transformations/apollo_c
 | `QUEDA_BRUSCA_PTS` | 10 | Definido pelo grupo: queda de saúde entre duas medições que conta como queda brusca |
 | `META_IS` | 80 | Definido pelo grupo: meta do IS Geral |
 | `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS |
+| `VIDA_UTIL_PADRAO_ANOS` | 25 | Padrão do pipeline, não vem do banco: vida útil usada no IS Ambiental quando o modelo de placa não tem `warranty_years` |
 
 ## Funcionalidades previstas
 

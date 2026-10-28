@@ -31,6 +31,12 @@ PADRAO_MIN = 0.80
 QUEDA_BRUSCA_PTS = 10
 META_IS = 80
 META_RESOLUCAO_DIAS = 7
+VIDA_UTIL_PADRAO_ANOS = 25
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC `VIDA_UTIL_PADRAO_ANOS` só vale quando o modelo da placa não tem `warranty_years` no banco. Para desligar esse padrão e deixar o IS Ambiental vazio nesses casos, use 0.
 
 # COMMAND ----------
 
@@ -279,12 +285,7 @@ def os_resolucao():
 # COMMAND ----------
 
 def ativos_filial():
-    panels = read_cleaned("dim_panel")
-    unit_via_string = string_unit().select("string_key", F.col("company_unit_key").alias("unit_via_string"))
-    placas = panels.join(unit_via_string, "string_key", "left")
-    own_unit = F.col("company_unit_key") if "company_unit_key" in panels.columns else F.lit(None)
-    placas = (placas.withColumn("company_unit_key", F.coalesce(own_unit, F.col("unit_via_string")))
-                    .filter(F.col("company_unit_key").isNotNull()))
+    placas = read_cleaned("dim_panel").join(string_unit().select("string_key", "company_unit_key"), "string_key")
     status = F.col("operating_stats")
     df = placas.groupBy("company_unit_key").agg(
         F.count("*").alias("total_placas"),
@@ -379,7 +380,7 @@ def estoque_filial(estoque):
 
 # MAGIC %md
 # MAGIC #### Índices de sustentabilidade (IS)
-# MAGIC O IS Financeiro fica de fora: ele depende de consumo e tarifa do usuário, que não existem no banco. O IS Geral é a média dos IS que existem (Energético e Ambiental).
+# MAGIC O IS Financeiro fica de fora: ele depende de consumo e tarifa do usuário, que não existem no banco. O IS Geral é a média dos IS que existem (Energético e Ambiental). A vida útil do IS Ambiental vem de `warranty_years` do modelo de placa; quando o banco não tem esse valor, vale `VIDA_UTIL_PADRAO_ANOS`.
 
 # COMMAND ----------
 
@@ -403,6 +404,20 @@ def is_energetico_string():
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ##### Vida útil de cada string
+# MAGIC Usa a garantia do modelo de placa. Se o modelo não tem garantia cadastrada, usa `VIDA_UTIL_PADRAO_ANOS`.
+
+# COMMAND ----------
+
+def vida_util_por_string():
+    modelos = read_cleaned("dim_panel_model").select("panel_model_key", "warranty_years")
+    strings = string_unit().select("string_key", "panel_model_key").join(modelos, "panel_model_key", "left")
+    vida_util = F.coalesce(F.col("warranty_years").cast("double"), F.lit(float(VIDA_UTIL_PADRAO_ANOS)))
+    return strings.select("string_key", vida_util.alias("vida_util_anos"))
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ##### IS Ambiental por string
 
 # COMMAND ----------
@@ -411,12 +426,10 @@ def is_ambiental_string():
     placas = read_cleaned("dim_panel").filter(F.col("installation_dt").isNotNull() & F.col("deactivated_at").isNull())
     idade = placas.groupBy("string_key").agg(
         F.avg(F.datediff(F.current_date(), F.col("installation_dt")) / 365.25).alias("idade_media_anos"))
-    garantia = string_unit().select("string_key", "panel_model_key").join(
-        read_cleaned("dim_panel_model").select("panel_model_key", "warranty_years"), "panel_model_key")
-    df = idade.join(garantia, "string_key")
-    restante = (1 - F.col("idade_media_anos") / F.col("warranty_years")) * 100
-    is_amb = F.when(F.col("warranty_years") > 0, F.greatest(F.lit(0.0), F.least(F.lit(100.0), restante)))
-    return df.select("string_key", "idade_media_anos", "warranty_years", F.round(is_amb, 2).alias("is_ambiental"))
+    df = idade.join(vida_util_por_string(), "string_key")
+    restante = (1 - F.col("idade_media_anos") / F.col("vida_util_anos")) * 100
+    is_amb = F.when(F.col("vida_util_anos") > 0, F.greatest(F.lit(0.0), F.least(F.lit(100.0), restante)))
+    return df.select("string_key", "idade_media_anos", "vida_util_anos", F.round(is_amb, 2).alias("is_ambiental"))
 
 # COMMAND ----------
 
@@ -501,12 +514,9 @@ def is_ambiental_string_dia(dias_da_string):
     idade = placas_ativas.groupBy("string_key", "full_date").agg(
         F.avg(F.datediff(F.col("full_date"), F.col("installation_dt")) / 365.25).alias("idade_media_anos"))
 
-    garantia = string_unit().select("string_key", "panel_model_key").join(
-        read_cleaned("dim_panel_model").select("panel_model_key", "warranty_years"), "panel_model_key")
-
-    df = idade.join(garantia, "string_key")
-    restante = (1 - F.col("idade_media_anos") / F.col("warranty_years")) * 100
-    is_ambiental = F.when(F.col("warranty_years") > 0, F.greatest(F.lit(0.0), F.least(F.lit(100.0), restante)))
+    df = idade.join(vida_util_por_string(), "string_key")
+    restante = (1 - F.col("idade_media_anos") / F.col("vida_util_anos")) * 100
+    is_ambiental = F.when(F.col("vida_util_anos") > 0, F.greatest(F.lit(0.0), F.least(F.lit(100.0), restante)))
     return df.select("string_key", "full_date", F.round(is_ambiental, 2).alias("is_ambiental"))
 
 # COMMAND ----------
