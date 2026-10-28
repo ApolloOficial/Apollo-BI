@@ -12,7 +12,7 @@ apenas a própria filial.
 
 ## Dados de origem
 
-O pipeline tem duas fontes, cada uma com a sua trilha de notebooks:
+O pipeline tem duas fontes, cada uma com a sua trilha de código:
 
 | Fonte | Trilha | O que traz |
 |---|---|---|
@@ -108,7 +108,7 @@ O dia do evento usa o horário de São Paulo. Status HTTP a partir de 400 conta 
 
 ### Parâmetros
 
-Parâmetros do cálculo, na célula de parâmetros do notebook `apollo_curated_operacional`:
+Parâmetros do cálculo, no início de `apollo-pipeline/transformations/apollo_curated_operacional.py`:
 
 | Parâmetro | Valor | Situação |
 |---|---|---|
@@ -122,11 +122,11 @@ Parâmetros do cálculo, na célula de parâmetros do notebook `apollo_curated_o
 
 - Conexão com o Neon por JDBC e com o MongoDB por `pymongo`, com credenciais em um arquivo `.env` lido com `python-dotenv`;
 - ingestão das 20 views do `dm` e da coleção `tracking_events` sem alteração de valores na camada `raw`;
-- limpeza na camada `cleaned`: 16 tratamentos na trilha operacional e 10 na trilha tracking, com o efeito de cada um registrado em `cleaning_log` e `cleaning_log_mongo`;
+- limpeza na camada `cleaned`: 16 tratamentos na trilha operacional e 10 na trilha tracking, com linhas e nulos antes e depois registrados em `cleaning_log` e `cleaning_log_mongo`;
 - cálculo dos KPIs e dos IS na camada `curated`;
 - dashboard (Lakeview) embutido na aba Métricas da web;
 - acesso restrito por filial (Row Filter) para Gerente e Analista;
-- Job no Databricks para executar o pipeline sem rodar célula por célula;
+- pipeline declarativa (`@dp.materialized_view`) para a `cleaned` e a `curated`, com a ordem deduzida das dependências;
 - relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
 
 ## Arquitetura
@@ -139,15 +139,15 @@ flowchart LR
     N --> DM[Views do schema dm]
     DM --> C[Notebook core]
     M[App mobile] --> MG[(MongoDB tracking_events)]
-    C --> R[raw]
-    MG --> R
-    R --> CL[cleaned]
+    C --> RO[apollo_raw_operacional]
+    MG --> RT[apollo_raw_tracking]
+    RO --> R[raw]
+    RT --> R
+    R --> P[Pipeline Apollo_BI]
+    P --> CL[cleaned]
     CL --> CU[curated]
     CU --> D[Dashboard Lakeview]
     D --> W[Web Apollo: aba Métricas]
-    J[Job do Databricks] -. orquestra .-> R
-    J -. orquestra .-> CL
-    J -. orquestra .-> CU
 ```
 
 | Camada | Equivalente medalhão | O que contém |
@@ -163,9 +163,10 @@ Tratamentos da `cleaned`:
 | `operacional` (16) | Espaços extras, nulo escrito como texto, caixa e grafia das categorias, categoria fora do domínio, NaN e infinito, negativo impossível, valor fora da faixa, outlier extremo de geração, data no futuro, data de preenchimento padrão, ordem cronológica, linha duplicada, chave nula, chave duplicada e chave estrangeira órfã |
 | `tracking` (10) | Espaços extras, nulo escrito como texto, caixa das categorias, UUID inválido, conversão de tipos, NaN e infinito, valor fora da faixa, data impossível, evento sem campo obrigatório e evento duplicado |
 
-Cada notebook da `cleaned` grava uma tabela de log (`cleaning_log` e `cleaning_log_mongo`)
-com as linhas removidas e os nulos criados por tratamento. Elas são a evidência da etapa
-de tratamento para o relatório gerencial.
+Cada trilha da `cleaned` publica uma tabela de log (`cleaning_log` e `cleaning_log_mongo`)
+com as linhas e os nulos de cada tabela antes (`raw`) e depois (`cleaned`) da limpeza. Elas
+são a evidência da etapa de tratamento para o relatório gerencial. O log não detalha mais o
+efeito de cada tratamento, porque a pipeline declarativa não executa a contagem passo a passo.
 
 ```text
 apollo-bi/
@@ -174,27 +175,34 @@ apollo-bi/
 │   ├── apollo_connection_test         # Teste da conexão com o Neon (conta as views e mostra os dados)
 │   └── apollo_connection_mongo_test   # Teste da conexão com o MongoDB (ping, coleções e conversão)
 ├── apollo-pipeline/
-│   ├── apollo_raw_operacional         # Neon (dm) para a camada raw
-│   ├── apollo_cleaned_operacional     # raw para a camada cleaned
-│   ├── apollo_curated_operacional     # cleaned para a camada curated (KPIs e IS)
-│   ├── apollo_raw_tracking            # MongoDB (tracking_events) para a camada raw
-│   ├── apollo_cleaned_tracking        # raw para a camada cleaned
-│   └── apollo_curated_tracking        # cleaned para a camada curated (KPIs de uso do app)
-├── apollo_manager/                    # Dashboard principal (a criar)
+│   ├── apollo_raw_operacional         # Notebook de ingestão: Neon (dm) para a camada raw
+│   ├── apollo_raw_tracking            # Notebook de ingestão: MongoDB (tracking_events) para a camada raw
+│   ├── transformations/               # Fontes da pipeline Apollo_BI (ETL Pipeline declarativa)
+│   │   ├── apollo_cleaned_operacional # raw para cleaned (16 tratamentos) e cleaning_log
+│   │   ├── apollo_cleaned_tracking    # raw para cleaned (10 tratamentos) e cleaning_log_mongo
+│   │   ├── apollo_curated_operacional # cleaned para curated (KPIs e IS)
+│   │   └── apollo_curated_tracking    # cleaned para curated (KPIs de uso do app)
+│   └── explorations/                  # Notebooks de apoio, fora da pipeline
+│       ├── apollo_perfil_dados        # Perfil e categorias das tabelas da raw
+│       └── apollo_percentis_metas     # Percentis usados para escolher as metas dos KPIs
+├── docs/
 └── README.md
 ```
 
 As tabelas são salvas como `workspace.raw`, `workspace.cleaned` e
 `workspace.curated`. O catálogo, o schema de origem e a lista de views ficam nas
-variáveis do notebook core. Os notebooks da trilha `tracking` não usam o core e
-podem rodar em paralelo com os da trilha `operacional`.
+variáveis do notebook core. A `cleaned` e a `curated` são *materialized views*
+declaradas com `@dp.materialized_view()`: a pipeline deduz a ordem de execução a partir
+das leituras (`spark.read.table`), então não há lista de ordem nem `saveAsTable`. As duas
+trilhas não dependem uma da outra e rodam em paralelo.
 
 ## Tecnologias
 
 | Tecnologia | Uso no projeto |
 |---|---|
-| Databricks | Execução dos notebooks, Jobs e dashboard Lakeview |
+| Databricks | Execução dos notebooks, pipeline declarativa (ETL Pipeline) e dashboard Lakeview |
 | PySpark | Leitura, tratamento e transformação dos dados |
+| `pyspark.pipelines` | Definição das *materialized views* da `cleaned` e da `curated` |
 | Delta Lake | Armazenamento das tabelas de cada camada |
 | Neon (PostgreSQL) | Banco operacional do Apollo, fonte do BI |
 | MongoDB Atlas | Tracking de uso do app mobile, fonte do BI |
@@ -249,21 +257,31 @@ Cada integrante cria o seu arquivo `.env` na raiz da Git folder:
 - `apollo-core/apollo_connection_test`: use **Run all**. O resultado esperado é a contagem das 20 views do `dm` e a exibição dos dados;
 - `apollo-core/apollo_connection_mongo_test`: troque `NOME_DA_COLECAO` por `tracking_events` e use **Run all**. O resultado esperado é o `ping`, a lista de coleções com as contagens e uma amostra dos eventos.
 
-### 5. Execute o pipeline
+### 5. Crie a pipeline
 
-Rode os notebooks de `apollo-pipeline` nesta ordem. As duas trilhas são independentes
-e podem rodar em paralelo, mas dentro de cada trilha a ordem é fixa:
+Em **Jobs & Pipelines > Create > ETL pipeline**, com estas configurações:
 
-| Etapa | Trilha operacional | Trilha tracking |
-|---|---|---|
-| 1 | `apollo_raw_operacional` | `apollo_raw_tracking` |
-| 2 | `apollo_cleaned_operacional` | `apollo_cleaned_tracking` |
-| 3 | `apollo_curated_operacional` | `apollo_curated_tracking` |
+| Campo | Valor |
+|---|---|
+| Nome | `Apollo_BI` |
+| Catálogo padrão | `workspace` |
+| Root folder | `apollo-pipeline` |
+| Source code | `apollo-pipeline/transformations` |
+| Modo | Triggered |
 
-### 6. Job
+Os nomes das tabelas são completos (`workspace.cleaned.*` e `workspace.curated.*`), então o
+schema padrão não importa. Antes da primeira execução, apague as tabelas antigas de
+`workspace.cleaned` e `workspace.curated` (`DROP TABLE IF EXISTS`), porque a pipeline só cria
+tabelas que ela mesma gerencia. Não apague a `raw`.
 
-O Job executa as seis tarefas na ordem acima, com as etapas da mesma trilha encadeadas.
-O Job precisa usar a pasta onde está o `.env`, porque o arquivo não vai para o Git.
+### 6. Execute
+
+1. Confirme que a `raw` tem as 21 tabelas com dados (`SHOW TABLES IN workspace.raw`). Se não tiver, rode `apollo_raw_operacional` e `apollo_raw_tracking`;
+2. clique em **Run pipeline**. A ordem entre `raw`, `cleaned` e `curated` é deduzida das leituras (`spark.read.table`), e as duas trilhas rodam em paralelo.
+
+> A pipeline só lê a `raw`. Por isso a ingestão (Neon e MongoDB) continua em notebooks
+> comuns, executados antes dela. Os arquivos de `transformations/` não rodam como notebook
+> comum: só dentro da pipeline.
 
 ## Configuração do notebook core
 
@@ -287,18 +305,18 @@ maio de 2026.
 | Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
 | Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
 | Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
-| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | ✅ | Seis notebooks executados com sucesso no Databricks (duas trilhas); a `curated` tem 20 tabelas |
+| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Ingestão em notebooks e pipeline declarativa `Apollo_BI` (`cleaned` e `curated`) escritas; falta executar no Databricks |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
-| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ⏳ | Planejado |
+| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ⏳ | Fora desta entrega: a pipeline `Apollo_BI` está pronta para ser usada como tarefa de um Job |
 | Dashboard construído a partir da base final do pipeline | ⏳ | Será lido do schema `workspace.curated` |
-| Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Planejado |
+| Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Depende da primeira execução do Job |
 | Relatório explica o fluxo, as etapas automatizadas e a relação com KPIs e dashboard | ⏳ | Planejado |
 
 **Legenda:** ✅ concluído · 🚧 em desenvolvimento · ⏳ planejado
 
 ## Próximos passos
 
-- criar o Job com as seis tarefas e guardar a evidência (configuração, histórico, status e resultado);
+- montar o Job que encadeia as ingestões e a pipeline `Apollo_BI`, e guardar a evidência (configuração, histórico, status e resultado);
 - construir o dashboard a partir da base `curated`, seguindo o desenho de [DASHBOARD.md](DASHBOARD.md);
 - escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
 - adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
@@ -323,8 +341,8 @@ Fluxo do dia a dia:
 3. edite apenas o notebook combinado e rode para testar;
 4. faça **Commit & Push** e abra o Pull Request.
 
-O notebook `apollo_connection_neon_core` é versionado em `.py` e os demais em `.ipynb`.
-Limpe as saídas das células antes de fazer o commit.
+O notebook `apollo_connection_neon_core`, as fontes de `transformations/` e os notebooks de `explorations/` são versionados em `.py`; as ingestões e os testes de conexão, em `.ipynb`.
+Limpe as saídas das células antes de fazer o commit. Depois de mudar uma fonte da pipeline, rode a pipeline `Apollo_BI` de novo para atualizar a `curated`.
 
 ---
 
