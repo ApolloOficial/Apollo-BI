@@ -9,7 +9,7 @@ Apollo no Neon e o tracking do app mobile no MongoDB, calcula os KPIs e os índi
 sustentabilidade (IS) e alimenta o dashboard embutido na web.
 
 [![Databricks](https://img.shields.io/badge/Databricks-Free_Edition-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://www.databricks.com/)
-[![Python](https://img.shields.io/badge/PySpark-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://spark.apache.org/docs/latest/api/python/)
+[![SQL](https://img.shields.io/badge/SQL-Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://docs.databricks.com/aws/en/sql/)
 [![Neon](https://img.shields.io/badge/Neon-PostgreSQL-00E599?style=for-the-badge&logo=postgresql&logoColor=white)](https://neon.tech/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/atlas)
 [![Delta Lake](https://img.shields.io/badge/Delta_Lake-Medalh%C3%A3o-00ADD4?style=for-the-badge)](https://delta.io/)
@@ -76,14 +76,14 @@ O tracking traz `company_id`, mas não a filial. Por isso os KPIs dele são por 
 | Índice | O que mede | Situação |
 |---|---|---|
 | **IS Energético** | Queda brusca na captação e desempenho abaixo do padrão da etiqueta do equipamento | Calculado |
-| **IS Ambiental** | Vida útil do painel, usando a garantia do modelo de placa como vida útil | Calculado (se o modelo não tem `warranty_years`, vale `VIDA_UTIL_PADRAO_ANOS`) |
+| **IS Ambiental** | Vida útil do painel, usando a garantia do modelo de placa como vida útil | Calculado (precisa de `warranty_years` preenchido no `panel_model`) |
 | **IS Financeiro** | Custo do painel comparado ao que seria pago de energia sem o sistema | Fora do cálculo: não existem consumo e tarifa no banco |
 | **IS Geral** | Média dos IS calculados (Energético e Ambiental), por filial | Calculado |
 
 Regras de cálculo definidas pelo grupo:
 
 - Tudo o que não existir no banco atual fica de fora do cálculo. O schema não será alterado para isso;
-- cada IS é calculado por string e depois agregado por filial, no total do histórico (`kpi_is_filial`) e por dia (`kpi_is_filial_diario`);
+- cada IS é calculado por string e depois agregado por filial;
 - não existe tabela por painel na camada final.
 
 Como cada IS é calculado:
@@ -91,16 +91,8 @@ Como cada IS é calculado:
 - **IS Energético:** média de dois percentuais por string. O primeiro é a parcela dos
   dias com pico de potência dentro do padrão da etiqueta (`peak_to_nominal_ratio`).
   O segundo é a parcela das medições de saúde sem queda brusca (`health_delta`);
-- **IS Ambiental:** parcela da vida útil que ainda resta, a partir da idade média das
-  placas instaladas e ativas da string. A vida útil é a garantia do modelo de placa
-  (`warranty_years`). O dataload atual do banco não preenche esse campo, então o pipeline
-  usa `VIDA_UTIL_PADRAO_ANOS` nesses casos; com valor 0 o IS Ambiental fica vazio.
-
-IS por dia: as mesmas regras valem para cada dia. O IS Energético usa as leituras e as
-medições do dia, e o IS Ambiental usa as placas já instaladas e ainda ativas naquele dia.
-O IS de uma semana ou de um mês é a média dos IS diários do período, calculada no
-dashboard. O IS acumulado (`kpi_is_filial`) continua disponível e não muda com o filtro de
-período.
+- **IS Ambiental:** parcela da garantia que ainda resta, a partir da idade média das
+  placas instaladas e ativas da string.
 
 ## KPIs calculados
 
@@ -118,8 +110,7 @@ Além dos IS, a camada `curated` entrega KPIs para o dashboard.
 | `kpi_alertas_filial` | Alertas por status, alertas sem OS e horas até a OS |
 | `kpi_realocacao_filial` | Solicitações de realocação, internas e externas |
 | `kpi_estoque_peca`, `kpi_estoque_filial` | Estoque de peças e itens abaixo do mínimo |
-| `kpi_is_string`, `kpi_is_filial` | IS Energético, IS Ambiental e IS Geral de todo o histórico, por string e por filial |
-| `kpi_is_filial_diario` | IS Energético, IS Ambiental, IS Geral e desvio da meta por filial e dia |
+| `kpi_is_string`, `kpi_is_filial` | IS Energético, IS Ambiental e IS Geral |
 | `dim_filial_mapa` | Cidade, estado e indicadores de risco de cada filial |
 
 ### Trilha tracking
@@ -136,26 +127,26 @@ O dia do evento usa o horário de São Paulo. Status HTTP a partir de 400 conta 
 
 ### Parâmetros
 
-Parâmetros do cálculo, no início de `apollo-pipeline/transformations/apollo_curated_operacional.py`:
+Os parâmetros do cálculo estão escritos direto nos arquivos `.sql` de `apollo-pipeline/transformations`. Para mudar um valor, altere o número no arquivo indicado:
 
-| Parâmetro | Valor | Situação |
-|---|---|---|
-| `LIMIAR_SAUDE` | 70 | Definido pelo grupo para o BI: igual ao alerta do sistema, strings com saúde abaixo de 70 contam como abaixo do limiar |
-| `PADRAO_MIN` | 0,80 | Definido pelo grupo: razão pico/nominal mínima para estar dentro do padrão da etiqueta |
-| `QUEDA_BRUSCA_PTS` | 10 | Definido pelo grupo: queda de saúde entre duas medições que conta como queda brusca |
-| `META_IS` | 80 | Definido pelo grupo: meta do IS Geral |
-| `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS |
-| `VIDA_UTIL_PADRAO_ANOS` | 25 | Padrão do pipeline, não vem do banco: vida útil usada no IS Ambiental quando o modelo de placa não tem `warranty_years` |
+| Parâmetro | Valor | Situação | Onde alterar (`apollo_curated_<nome>.sql`) |
+|---|---|---|---|
+| `LIMIAR_SAUDE` | 70 | Definido pelo grupo para o BI: igual ao alerta do sistema, strings com saúde abaixo de 70 contam como abaixo do limiar | `kpi_saude_string` e `kpi_saude_filial` |
+| `PADRAO_MIN` | 0,80 | Definido pelo grupo: razão pico/nominal mínima para estar dentro do padrão da etiqueta | `kpi_is_string` e `kpi_is_filial_diario` |
+| `QUEDA_BRUSCA_PTS` | 10 | Definido pelo grupo: queda de saúde entre duas medições que conta como queda brusca | `kpi_is_string` e `kpi_is_filial_diario` |
+| `META_IS` | 80 | Definido pelo grupo: meta do IS Geral | `kpi_is_filial` e `kpi_is_filial_diario` |
+| `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS | `kpi_manutencao_filial_mes` e `kpi_os_resolucao` |
+| `VIDA_UTIL_PADRAO_ANOS` | 25 | Usado quando o modelo de placa não tem `warranty_years` | `kpi_is_string` e `kpi_is_filial_diario` |
 
 ## Funcionalidades previstas
 
-- Conexão com o Neon por JDBC e com o MongoDB por `pymongo`, com credenciais em um arquivo `.env` lido com `python-dotenv`;
+- Conexão com o Neon por JDBC e com o MongoDB por `pymongo`, com credenciais em um arquivo `.env` lido com `python-dotenv` (só nas ingestões da `raw`);
 - ingestão das 20 views do `dm` e da coleção `tracking_events` sem alteração de valores na camada `raw`;
-- limpeza na camada `cleaned`: 16 tratamentos na trilha operacional e 10 na trilha tracking, com linhas e nulos antes e depois registrados em `cleaning_log` e `cleaning_log_mongo`;
-- cálculo dos KPIs e dos IS na camada `curated`;
+- limpeza na camada `cleaned` em SQL puro: 16 tratamentos na trilha operacional e 10 na trilha tracking, com linhas e nulos antes e depois registrados em `cleaning_log` e `cleaning_log_mongo`;
+- cálculo dos KPIs e dos IS na camada `curated`, também em SQL puro;
 - dashboard (Lakeview) embutido na aba Métricas da web;
 - acesso restrito por filial (Row Filter) para Gerente e Analista;
-- pipeline declarativa (`@dp.materialized_view`) para a `cleaned` e a `curated`, com a ordem deduzida das dependências;
+- pipeline declarativa (`CREATE OR REFRESH MATERIALIZED VIEW`) para a `cleaned` e a `curated`, com um arquivo `.sql` por tabela e a ordem deduzida das dependências;
 - relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
 
 ## Arquitetura
@@ -181,7 +172,7 @@ flowchart LR
 
 | Camada | Equivalente medalhão | O que contém |
 |---|---|---|
-| `raw` | Bronze | Cópia fiel das 20 views do `dm` e da coleção `tracking_events` (tudo como texto), sem alterar os dados |
+| `raw` | Bronze | Cópia fiel das 20 views do `dm` (com os tipos do Postgres) e da coleção `tracking_events` (tudo como texto, mais `mongo_id` e `ingested_at`), sem alterar os dados |
 | `cleaned` | Silver | As mesmas tabelas, com tipos convertidos e os tratamentos de qualidade aplicados |
 | `curated` | Gold | KPIs e IS prontos para o dashboard |
 
@@ -206,11 +197,14 @@ apollo-bi/
 ├── apollo-pipeline/
 │   ├── apollo_raw_operacional         # Notebook de ingestão: Neon (dm) para a camada raw
 │   ├── apollo_raw_tracking            # Notebook de ingestão: MongoDB (tracking_events) para a camada raw
-│   ├── transformations/               # Fontes da pipeline Apollo_BI (ETL Pipeline declarativa)
-│   │   ├── apollo_cleaned_operacional # raw para cleaned (16 tratamentos) e cleaning_log
-│   │   ├── apollo_cleaned_tracking    # raw para cleaned (10 tratamentos) e cleaning_log_mongo
-│   │   ├── apollo_curated_operacional # cleaned para curated (KPIs e IS)
-│   │   └── apollo_curated_tracking    # cleaned para curated (KPIs de uso do app)
+│   ├── transformations/               # Fontes da pipeline Apollo_BI (ETL Pipeline declarativa), só arquivos .sql
+│   │   ├── apollo_cleaned_<tabela>        # 20 arquivos: raw para cleaned, um por view do dm
+│   │   ├── apollo_cleaned_log_operacional # cleaning_log: linhas e nulos antes e depois (operacional)
+│   │   ├── apollo_cleaned_tracking        # raw para cleaned (10 tratamentos do tracking)
+│   │   ├── apollo_cleaned_log_tracking    # cleaning_log_mongo: linhas e nulos antes e depois (tracking)
+│   │   ├── apollo_curated_kpi_*           # 15 arquivos de KPIs e IS da trilha operacional
+│   │   ├── apollo_curated_dim_filial_mapa # Filial com cidade, estado e risco para o mapa
+│   │   └── apollo_curated_kpi_tracking_*  # 5 arquivos de KPIs de uso do app
 │   └── explorations/                  # Notebooks de apoio, fora da pipeline
 │       ├── apollo_perfil_dados        # Perfil e categorias das tabelas da raw
 │       └── apollo_percentis_metas     # Percentis usados para escolher as metas dos KPIs
@@ -221,8 +215,8 @@ apollo-bi/
 As tabelas são salvas como `workspace.raw`, `workspace.cleaned` e
 `workspace.curated`. O catálogo, o schema de origem e a lista de views ficam nas
 variáveis do notebook core. A `cleaned` e a `curated` são *materialized views*
-declaradas com `@dp.materialized_view()`: a pipeline deduz a ordem de execução a partir
-das leituras (`spark.read.table`), então não há lista de ordem nem `saveAsTable`. As duas
+declaradas com `CREATE OR REFRESH MATERIALIZED VIEW` em arquivos `.sql`, uma por tabela: a pipeline deduz a ordem de execução a partir
+das tabelas citadas em cada `FROM` e `JOIN`, então não há lista de ordem nem `saveAsTable`. As duas
 trilhas não dependem uma da outra e rodam em paralelo.
 
 ## Tecnologias
@@ -230,8 +224,9 @@ trilhas não dependem uma da outra e rodam em paralelo.
 | Tecnologia | Uso no projeto |
 |---|---|
 | Databricks | Execução dos notebooks, pipeline declarativa (ETL Pipeline) e dashboard Lakeview |
-| PySpark | Leitura, tratamento e transformação dos dados |
-| `pyspark.pipelines` | Definição das *materialized views* da `cleaned` e da `curated` |
+| SQL (Databricks SQL) | Tratamento (`cleaned`) e cálculo dos KPIs (`curated`) |
+| `CREATE OR REFRESH MATERIALIZED VIEW` | Definição das tabelas da `cleaned` e da `curated` na pipeline |
+| PySpark e pandas | Apenas nas ingestões da `raw` (leitura JDBC e MongoDB) |
 | Delta Lake | Armazenamento das tabelas de cada camada |
 | Neon (PostgreSQL) | Banco operacional do Apollo, fonte do BI |
 | MongoDB Atlas | Tracking de uso do app mobile, fonte do BI |
@@ -306,11 +301,11 @@ tabelas que ela mesma gerencia. Não apague a `raw`.
 ### 6. Execute
 
 1. Confirme que a `raw` tem as 21 tabelas com dados (`SHOW TABLES IN workspace.raw`). Se não tiver, rode `apollo_raw_operacional` e `apollo_raw_tracking`;
-2. clique em **Run pipeline**. A ordem entre `raw`, `cleaned` e `curated` é deduzida das leituras (`spark.read.table`), e as duas trilhas rodam em paralelo.
+2. clique em **Run pipeline**. A ordem entre `raw`, `cleaned` e `curated` é deduzida das tabelas citadas nos arquivos `.sql`, e as duas trilhas rodam em paralelo.
 
 > A pipeline só lê a `raw`. Por isso a ingestão (Neon e MongoDB) continua em notebooks
 > comuns, executados antes dela. Os arquivos de `transformations/` não rodam como notebook
-> comum: só dentro da pipeline.
+> comum: só dentro da pipeline. Para criar uma tabela nova, adicione um arquivo `.sql` nessa pasta.
 
 ## Configuração do notebook core
 
@@ -327,12 +322,12 @@ maio de 2026.
 
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
-| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated`; o desenho está em [DASHBOARD.md](docs/DASHBOARD.md) e as consultas em [DASHBOARD_DATASETS.md](docs/DASHBOARD_DATASETS.md) |
+| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated` |
 | Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês; uso do app por dia |
-| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta, com comparação da semana e do mês atuais contra os anteriores |
+| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta |
 | Histogramas e boxplots | ⏳ | Distribuição da saúde das strings, da duração das sessões e do tempo de resolução das OS |
 | Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
-| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard: período (dia, semana ou mês), filial e empresa; o tracking filtra por empresa, não por filial |
+| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
 | Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
 | Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Ingestão em notebooks e pipeline declarativa `Apollo_BI` (`cleaned` e `curated`) escritas; falta executar no Databricks |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
@@ -347,7 +342,7 @@ maio de 2026.
 
 - Criar a pipeline `Apollo_BI` no Databricks, executar e validar a execução completa;
 - montar o Job que encadeia as ingestões e a pipeline `Apollo_BI`, e guardar a evidência (configuração, histórico, status e resultado);
-- construir o dashboard a partir da base `curated`, seguindo o desenho de [DASHBOARD.md](docs/DASHBOARD.md) e as consultas de [DASHBOARD_DATASETS.md](docs/DASHBOARD_DATASETS.md);
+- construir o dashboard a partir da base `curated`;
 - escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
 - adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
 - deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação.
@@ -371,7 +366,7 @@ Fluxo do dia a dia:
 3. edite apenas o notebook combinado e rode para testar;
 4. faça **Commit & Push** e abra o Pull Request.
 
-O notebook `apollo_connection_neon_core`, as fontes de `transformations/` e os notebooks de `explorations/` são versionados em `.py`; as ingestões e os testes de conexão, em `.ipynb`.
+As fontes de `transformations/` são versionadas em `.sql`; o notebook `apollo_connection_neon_core` e os notebooks de `explorations/`, em `.py`; as ingestões e os testes de conexão, em `.ipynb`.
 Limpe as saídas das células antes de fazer o commit. Depois de mudar uma fonte da pipeline, rode a pipeline `Apollo_BI` de novo para atualizar a `curated`.
 
 ---
