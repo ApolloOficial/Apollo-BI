@@ -297,6 +297,23 @@ tabelas que ela mesma gerencia. Não apague a `raw`.
 > comuns, executados antes dela. Os arquivos de `transformations/` não rodam como notebook
 > comum: só dentro da pipeline. Para criar uma tabela nova, adicione um arquivo `.sql` nessa pasta.
 
+### 7. Crie o Job
+
+O Job executa o fluxo inteiro sem rodar célula por célula. Em **Jobs & Pipelines > Create > Job**, adicione as tarefas nesta ordem:
+
+| Tarefa | Tipo | Origem | Depende de |
+|---|---|---|---|
+| `raw_operacional` | Notebook | Workspace: `apollo-pipeline/apollo_raw_operacional` | nenhuma |
+| `raw_tracking` | Notebook | Workspace: `apollo-pipeline/apollo_raw_tracking` | nenhuma |
+| `Apollo_BI` | ETL Pipeline | Pipeline `Apollo_BI` | `raw_operacional` e `raw_tracking` |
+
+- Nas tarefas de notebook, use **Workspace** como origem e escolha o notebook dentro da sua Git folder, porque o `.env` com as credenciais não vai para o Git;
+- salve cada tarefa antes de adicionar a próxima;
+- para execução agendada, abra **Schedules & Triggers > Add trigger**; sem trigger, o Job roda manualmente com **Run now**;
+- depois da primeira execução, guarde as evidências nas abas **Tasks** (configuração), **Runs** (histórico e status) e na tabela `workspace.curated` (resultado).
+
+> A ordem é invertida em relação ao material da aula: lá o Job roda a pipeline e depois um notebook de exportação. Aqui as ingestões vêm antes, porque a pipeline só lê a `raw`. Não há exportação para o GitHub: o dashboard lê direto de `workspace.curated`.
+
 ## Configuração do notebook core
 
 | Variável | Padrão | Descrição |
@@ -321,7 +338,7 @@ maio de 2026.
 | Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
 | Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Ingestão em notebooks e pipeline declarativa `Apollo_BI` (`cleaned` e `curated`) escritas; falta executar no Databricks |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
-| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ⏳ | Fora desta entrega: a pipeline `Apollo_BI` está pronta para ser usada como tarefa de um Job |
+| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | 🚧 | Passo a passo na seção 7; falta criar o Job no Databricks |
 | Dashboard construído a partir da base final do pipeline | ⏳ | Será lido do schema `workspace.curated` |
 | Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Depende da primeira execução do Job |
 | Relatório explica o fluxo, as etapas automatizadas e a relação com KPIs e dashboard | ⏳ | Planejado |
