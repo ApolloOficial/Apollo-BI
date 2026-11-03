@@ -1,0 +1,20 @@
+{
+  "id": "3ed16af0-4883-4942-a212-9d65ad8dfa3c",
+  "pipeline_type": "WORKSPACE",
+  "name": "Apollo_Pipeline",
+  "libraries": [
+    {
+      "glob": {
+        "include": "/Workspace/Shared/Apollo-BI/apollo-pipeline/transformations/**"
+      }
+    }
+  ],
+  "schema": "default",
+  "continuous": false,
+  "development": false,
+  "photon": true,
+  "channel": "CURRENT",
+  "catalog": "workspace",
+  "serverless": true,
+  "root_path": "/Workspace/Shared/Apollo-BI/apollo-pipeline"
+}

@@ -1,0 +1,31 @@
+resources:
+  jobs:
+    Apollo_Job:
+      name: Apollo_Job
+      schedule:
+        quartz_cron_expression: 46 0 7 * * ?
+        timezone_id: America/Sao_Paulo
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: raw_operacional
+          notebook_task:
+            notebook_path: /Workspace/Shared/Apollo-BI/apollo-pipeline/apollo_raw_operacional
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: raw_tracking
+          notebook_task:
+            notebook_path: /Workspace/Shared/Apollo-BI/apollo-pipeline/apollo_raw_tracking
+            source: WORKSPACE
+        - task_key: Apollo_Pipeline
+          depends_on:
+            - task_key: raw_tracking
+            - task_key: raw_operacional
+          pipeline_task:
+            pipeline_id: 3ed16af0-4883-4942-a212-9d65ad8dfa3c
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
+      performance_target: PERFORMANCE_OPTIMIZED
