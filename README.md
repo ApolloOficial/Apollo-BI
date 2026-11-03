@@ -138,14 +138,13 @@ Os parâmetros do cálculo estão escritos direto nos arquivos `.sql` de `apollo
 | `META_RESOLUCAO_DIAS` | 7 | Definido pelo grupo: meta do tempo médio de resolução da OS | `kpi_manutencao_filial_mes` e `kpi_os_resolucao` |
 | `VIDA_UTIL_PADRAO_ANOS` | 25 | Usado quando o modelo de placa não tem `warranty_years` | `kpi_is_string` e `kpi_is_filial_diario` |
 
-## Funcionalidades previstas
+## Funcionalidades
 
 - Conexão com o Neon por JDBC e com o MongoDB por `pymongo`, com credenciais em um arquivo `.env` lido com `python-dotenv` (só nas ingestões da `raw`);
 - ingestão das 20 views do `dm` e da coleção `tracking_events` sem alteração de valores na camada `raw`;
 - limpeza na camada `cleaned` em SQL puro: 16 tratamentos na trilha operacional e 10 na trilha tracking, com linhas e nulos antes e depois registrados em `cleaning_log` e `cleaning_log_mongo`;
 - cálculo dos KPIs e dos IS na camada `curated`, também em SQL puro;
-- dashboard (Lakeview) embutido na aba Métricas da web;
-- acesso restrito por filial (Row Filter) para Gerente e Analista;
+- dashboard Métricas Solares (AI/BI) embutido na aba Métricas da web;
 - pipeline declarativa (`CREATE OR REFRESH MATERIALIZED VIEW`) para a `cleaned` e a `curated`, com um arquivo `.sql` por tabela e a ordem deduzida das dependências;
 - relatório gerencial com o fluxo do pipeline e a relação com os KPIs.
 
@@ -163,10 +162,10 @@ flowchart LR
     MG --> RT[apollo_raw_tracking]
     RO --> R[raw]
     RT --> R
-    R --> P[Pipeline Apollo_BI]
+    R --> P[Pipeline Apollo_Pipeline]
     P --> CL[cleaned]
     CL --> CU[curated]
-    CU --> D[Dashboard Lakeview]
+    CU --> D[Dashboard Métricas Solares]
     D --> W[Web Apollo: aba Métricas]
 ```
 
@@ -197,7 +196,7 @@ apollo-bi/
 ├── apollo-pipeline/
 │   ├── apollo_raw_operacional         # Notebook de ingestão: Neon (dm) para a camada raw
 │   ├── apollo_raw_tracking            # Notebook de ingestão: MongoDB (tracking_events) para a camada raw
-│   ├── transformations/               # Fontes da pipeline Apollo_BI (ETL Pipeline declarativa), só arquivos .sql
+│   ├── transformations/               # Fontes da pipeline Apollo_Pipeline (ETL Pipeline declarativa), só arquivos .sql
 │   │   ├── apollo_cleaned_<tabela>        # 20 arquivos: raw para cleaned, um por view do dm
 │   │   ├── apollo_cleaned_log_operacional # cleaning_log: linhas e nulos antes e depois (operacional)
 │   │   ├── apollo_cleaned_tracking        # raw para cleaned (10 tratamentos do tracking)
@@ -223,7 +222,7 @@ trilhas não dependem uma da outra e rodam em paralelo.
 
 | Tecnologia | Uso no projeto |
 |---|---|
-| Databricks | Execução dos notebooks, pipeline declarativa (ETL Pipeline) e dashboard Lakeview |
+| Databricks | Execução dos notebooks, pipeline declarativa (ETL Pipeline) e dashboard AI/BI Métricas Solares |
 | SQL (Databricks SQL) | Tratamento (`cleaned`) e cálculo dos KPIs (`curated`) |
 | `CREATE OR REFRESH MATERIALIZED VIEW` | Definição das tabelas da `cleaned` e da `curated` na pipeline |
 | PySpark e pandas | Apenas nas ingestões da `raw` (leitura JDBC e MongoDB) |
@@ -287,7 +286,7 @@ Em **Jobs & Pipelines > Create > ETL pipeline**, com estas configurações:
 
 | Campo | Valor |
 |---|---|
-| Nome | `Apollo_BI` |
+| Nome | `Apollo_Pipeline` |
 | Catálogo padrão | `workspace` |
 | Root folder | `apollo-pipeline` |
 | Source code | `apollo-pipeline/transformations` |
@@ -309,13 +308,13 @@ tabelas que ela mesma gerencia. Não apague a `raw`.
 
 ### 7. Crie o Job
 
-O Job executa o fluxo inteiro sem rodar célula por célula. Em **Jobs & Pipelines > Create > Job**, adicione as tarefas nesta ordem:
+O Job `Apollo_Job` executa o fluxo inteiro sem rodar célula por célula. Em **Jobs & Pipelines > Create > Job**, adicione as tarefas nesta ordem:
 
 | Tarefa | Tipo | Origem | Depende de |
 |---|---|---|---|
 | `raw_operacional` | Notebook | Workspace: `apollo-pipeline/apollo_raw_operacional` | nenhuma |
 | `raw_tracking` | Notebook | Workspace: `apollo-pipeline/apollo_raw_tracking` | nenhuma |
-| `Apollo_BI` | ETL Pipeline | Pipeline `Apollo_BI` | `raw_operacional` e `raw_tracking` |
+| `Apollo_Pipeline` | ETL Pipeline | Pipeline `Apollo_Pipeline` | `raw_operacional` e `raw_tracking` |
 
 - Nas tarefas de notebook, use **Workspace** como origem e escolha o notebook dentro da sua Git folder, porque o `.env` com as credenciais não vai para o Git;
 - salve cada tarefa antes de adicionar a próxima;
@@ -339,30 +338,26 @@ maio de 2026.
 
 | Requisito | Situação | Evidência no projeto |
 |---|:---:|---|
-| Dashboard conectado à fonte de dados da aplicação | ⏳ | Será construído sobre a camada `curated` |
-| Gráficos de barra e linha | ⏳ | Evolução da saúde, produção e manutenção por filial e mês; uso do app por dia |
-| Cards de KPIs e desvios | ⏳ | Saúde contra o limiar, IS Geral contra a meta, tempo de resolução contra a meta |
-| Histogramas e boxplots | ⏳ | Distribuição da saúde das strings, da duração das sessões e do tempo de resolução das OS |
-| Mapa, se houver dados geográficos | ⏳ | `dim_filial_mapa` traz cidade e estado; não há latitude e longitude, então o mapa é por cidade ou estado |
-| Filtros interativos (período, filial) | ⏳ | Planejado no dashboard; o tracking filtra por empresa, não por filial |
-| Relatório gerencial (base, problema, tratamento, KPIs) | ⏳ | O `cleaning_log` e o `cleaning_log_mongo` documentam o tratamento |
-| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | 🚧 | Ingestão em notebooks e pipeline declarativa `Apollo_BI` (`cleaned` e `curated`) escritas; falta executar no Databricks |
+| Dashboard conectado à fonte de dados da aplicação | ✅ | Dashboard Métricas Solares (AI/BI), exportado em [databricks/metricas_solares.lvdash.json](databricks/metricas_solares.lvdash.json), lendo `workspace.curated`, gerada a partir do Neon e do MongoDB; desenho em [docs/DASHBOARD.md](docs/DASHBOARD.md) e consultas em [docs/DASHBOARD_DATASETS.md](docs/DASHBOARD_DATASETS.md) |
+| Gráficos de barra e linha | ✅ | IS Geral, Energético e Ambiental por dia, com barras do período e linha de média móvel de 30 dias |
+| Cards de KPIs e desvios | ✅ | IS da semana e do mês atuais contra os anteriores e desvio da meta de 80 |
+| Histogramas e boxplots | ✅ | Histogramas da saúde das strings, dos dias de resolução e da duração das sessões; boxplots de saúde e IS Energético por inversor e de dias de resolução por tipo de manutenção |
+| Mapa, se houver dados geográficos | ✅ | Mapa "Localização da Filial", por cidade e estado a partir de `dim_filial_mapa` (não há latitude e longitude) |
+| Filtros interativos (período, filial) | ✅ | Período, tipo de data, tipo de manutenção, inversor, filial e empresa; o tracking filtra por empresa |
+| Relatório gerencial (base, problema, tratamento, KPIs) | ✅ | [relatório gerencial](docs/Relatorio_gerencial_Apollo.pdf) |
+| Pipeline no Databricks (leitura, tratamento, transformação, KPIs, base final) | ✅ | Ingestão em notebooks e pipeline `Apollo_Pipeline` (`cleaned` e `curated`); execução de 02/11/2026 com as 44 tabelas recalculadas; configuração em [databricks/apollo_pipeline.json](databricks/apollo_pipeline.json) |
 | Pipeline usando a fonte gerada pela aplicação | ✅ | `apollo_raw_operacional` lê o `dm` do Neon e `apollo_raw_tracking` lê o `tracking_events` do MongoDB |
-| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | 🚧 | Passo a passo na seção 7; falta criar o Job no Databricks |
-| Dashboard construído a partir da base final do pipeline | ⏳ | Será lido do schema `workspace.curated` |
-| Evidências do Job (configuração, histórico, status, resultado) | ⏳ | Depende da primeira execução do Job |
-| Relatório explica o fluxo, as etapas automatizadas e a relação com KPIs e dashboard | ⏳ | Planejado |
+| Job para executar o pipeline sem rodar célula por célula (manual ou agendado) | ✅ | Job `Apollo_Job` com 3 tarefas (seção 7), agendado todo dia às 07:00 (America/Sao_Paulo); configuração em [databricks/apollo_job.yml](databricks/apollo_job.yml) |
+| Dashboard construído a partir da base final do pipeline | ✅ | Todos os datasets leem `workspace.curated` |
+| Evidências do Job (configuração, histórico, status, resultado) | ✅ | Duas execuções com status Succeeded em 02/11/2026; prints na seção 6 do [relatório gerencial](docs/Relatorio_gerencial_Apollo.pdf) |
+| Relatório explica o fluxo, as etapas automatizadas e a relação com KPIs e dashboard | ✅ | Seção 6 do [relatório gerencial](docs/Relatorio_gerencial_Apollo.pdf), com a tabela que liga cada KPI à sua tabela de origem |
 
-**Legenda:** ✅ concluído · 🚧 em desenvolvimento · ⏳ planejado
+**Legenda:** ✅ concluído
 
 ## Próximos passos
 
-- Criar a pipeline `Apollo_BI` no Databricks, executar e validar a execução completa;
-- montar o Job que encadeia as ingestões e a pipeline `Apollo_BI`, e guardar a evidência (configuração, histórico, status e resultado);
-- construir o dashboard a partir da base `curated`;
-- escrever o relatório gerencial com a base, o problema, o tratamento, os KPIs, o fluxo do pipeline e a relação com o dashboard;
-- adicionar o Row Filter por filial quando os dashboards estiverem finalizados;
-- deixar o React pronto para receber o embed e ativar o trial de 14 dias do Databricks de 4 a 5 dias antes da apresentação.
+- Adicionar o Row Filter por filial para Gerente e Analista;
+- liberar o domínio da web no Databricks (**Settings > Security > Embed dashboards**) para o dashboard aparecer na aba Métricas da aplicação publicada.
 
 ## Contribuição
 
@@ -384,7 +379,7 @@ Fluxo do dia a dia:
 4. faça **Commit & Push** e abra o Pull Request.
 
 As fontes de `transformations/` são versionadas em `.sql`; o notebook `apollo_connection_neon_core` e os notebooks de `explorations/`, em `.py`; as ingestões e os testes de conexão, em `.ipynb`.
-Limpe as saídas das células antes de fazer o commit. Depois de mudar uma fonte da pipeline, rode a pipeline `Apollo_BI` de novo para atualizar a `curated`.
+Limpe as saídas das células antes de fazer o commit. Depois de mudar uma fonte da pipeline, rode a pipeline `Apollo_Pipeline` de novo para atualizar a `curated`.
 
 ---
 

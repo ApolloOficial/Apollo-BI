@@ -107,6 +107,6 @@ O mapa usa cidade e estado porque não há latitude e longitude na base.
 ## Regras
 
 - Cada card de desvio mostra o valor, a meta e a diferença, usando `desvio_limiar`, `desvio_meta`, `desvio_meta_resolucao` e `desvio_orcamento_pct`.
-- Os parâmetros de meta e limiar ficam escritos nos arquivos `.sql` de `apollo-pipeline/transformations` (a tabela de parâmetros do `README.md` diz em qual arquivo). Mudar a meta exige rodar a pipeline `Apollo_BI` de novo.
+- Os parâmetros de meta e limiar ficam escritos nos arquivos `.sql` de `apollo-pipeline/transformations` (a tabela de parâmetros do `README.md` diz em qual arquivo). Mudar a meta exige rodar a pipeline `Apollo_Pipeline` de novo.
 - O IS semanal e o mensal são a média dos IS diários do período. O IS acumulado de `kpi_is_filial` não muda com o filtro de período e não entra nesta página.
 - O dashboard fica publicado no workspace do pipeline, para ler as tabelas geradas pelo Job.
